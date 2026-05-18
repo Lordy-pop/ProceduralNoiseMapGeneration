@@ -1,0 +1,1467 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Procedural Noise Map Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            300: '#67e8f9',
+                            400: '#22d3ee',
+                            500: '#06b6d4',
+                            600: '#0891b2',
+                            700: '#0e7490',
+                        },
+                        panel: '#1e293b',
+                        bg: '#0f172a',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['Roboto Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #06b6d4;
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 0 10px rgba(6, 182, 212, 0.6);
+            transition: transform 0.1s;
+        }
+        input[type=range]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #334155;
+            border-radius: 2px;
+        }
+        input[type=range]:focus {
+            outline: none;
+        }
+        canvas {
+            image-rendering: pixelated;
+        }
+        @keyframes progress {
+            0% { width: 0%; }
+            100% { width: 100%; }
+        }
+        .animate-progress {
+            animation: progress 2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        }
+    </style>
+</head>
+<body class="bg-bg text-slate-300 font-sans h-screen flex overflow-hidden selection:bg-brand-500 selection:text-white relative">
+    <!-- Background Canvas -->
+    <canvas id="bg-canvas" class="fixed inset-0 w-full h-full object-cover opacity-20 blur-xl z-0"></canvas>
+
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="fixed inset-0 z-50 bg-bg flex flex-col items-center justify-center transition-opacity duration-500">
+        <div class="flex flex-col items-center gap-6">
+            <h1 class="text-3xl font-bold text-white tracking-widest uppercase">MEOW<span class="text-brand-500">.Noise</span></h1>
+            <div class="w-64 h-1.5 bg-slate-800 rounded-full overflow-hidden shadow-inner">
+                <div class="h-full bg-brand-500 animate-progress shadow-[0_0_10px_#06b6d4]"></div>
+            </div>
+            <p class="text-slate-500 text-xs font-mono tracking-[0.3em] uppercase animate-pulse">Initializing Engine</p>
+        </div>
+    </div>
+
+    <!-- Left Sidebar -->
+    <div class="w-80 bg-panel border-r border-slate-700 flex flex-col h-full z-10 shadow-2xl flex-shrink-0 relative">
+        <div class="p-6 border-b border-slate-700">
+            <h1 class="text-xl font-bold text-white tracking-wide">MEOW<span class="text-brand-500">.Noise</span></h1>
+            <p class="text-xs text-slate-400 mt-1">Procedural Map Generator</p>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto p-6 space-y-6">
+            <!-- Global Settings -->
+            <div>
+                <label class="block text-sm font-semibold text-white mb-2">Output Mode</label>
+                <select id="ui-outputMode" class="w-full bg-slate-800 border border-slate-600 rounded p-2 text-sm text-white focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none transition-colors">
+                    <option value="grayscale">Grayscale (Height Map)</option>
+                    <option value="normal">RGB Normal Map</option>
+                </select>
+            </div>
+
+            <div id="group-tint">
+                <div class="flex justify-between items-center mb-1">
+                    <label class="text-sm font-semibold text-white">Value Gradient Mapping</label>
+                    <div class="flex gap-1">
+                        <button id="btn-add-color" class="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 rounded text-xs font-bold text-white transition-colors" title="Add Step">+</button>
+                        <button id="btn-remove-color" class="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 rounded text-xs font-bold text-white transition-colors" title="Remove Step">-</button>
+                        <button id="btn-random-palette" class="px-2 py-0.5 bg-brand-600 hover:bg-brand-500 rounded text-xs font-bold text-white transition-colors" title="Randomize Palette">🎲 Random</button>
+                    </div>
+                </div>
+                <div id="color-stops-container" class="flex gap-1 w-full flex-wrap">
+                    <!-- Dynamic inputs injected here -->
+                </div>
+            </div>
+
+            <hr class="border-slate-700">
+
+            <!-- Layers Manager -->
+            <div>
+                <div class="flex justify-between items-center mb-2">
+                    <label class="block text-sm font-semibold text-white">Noise Layers</label>
+                    <div class="flex gap-1">
+                        <button id="btn-add-layer" class="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 rounded text-xs font-bold text-white transition-colors" title="Add Layer">+</button>
+                        <button id="btn-remove-layer" class="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 rounded text-xs font-bold text-white transition-colors" title="Remove Layer">-</button>
+                    </div>
+                </div>
+                <div class="flex justify-between items-start mb-4 gap-2">
+                    <!-- Dynamic Layer Tabs -->
+                    <div id="layer-tabs-container" class="flex gap-1 flex-wrap flex-1">
+                        <!-- Dynamic Layer Tabs -->
+                    </div>
+                    
+                    <label class="flex items-center justify-center gap-1.5 cursor-pointer bg-slate-800/80 px-2 py-1 rounded border border-slate-700 hover:border-brand-500 transition-colors shrink-0">
+                        <span class="text-xs font-semibold text-slate-300" title="View selected layer only">Solo</span>
+                        <input type="checkbox" id="ui-soloLayer" class="w-3 h-3 text-brand-500 rounded bg-slate-900 border-slate-700 focus:ring-brand-500">
+                    </label>
+                </div>
+                
+                <!-- Per-Layer Settings -->
+                <div id="layer-settings" class="space-y-4 p-4 bg-slate-800/50 rounded border border-slate-700">
+                    <div>
+                        <label class="block text-sm font-semibold text-white mb-2">Noise Type</label>
+                        <select id="ui-noiseType" class="w-full bg-slate-800 border border-slate-600 rounded p-2 text-sm text-white focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none transition-colors">
+                            <option value="perlin">Perlin Noise</option>
+                            <option value="simplex">Simplex Noise</option>
+                            <option value="fbm">Fractional Brownian Motion (fBm)</option>
+                            <option value="voronoi">Voronoi / Cellular</option>
+                            <option value="ridged">Ridged Multi-fractal</option>
+                            <option value="curl">Curl Noise</option>
+                            <option value="blue">Blue Noise (Approx)</option>
+                            <option value="halftone">Halftone / Dots</option>
+                            <option value="hatch">Hatching / Lines</option>
+                            <option value="square">Square / Value Noise</option>
+                        </select>
+                    </div>
+
+                    <div id="group-blend">
+                        <label class="block text-sm font-semibold text-white mb-2">Blend Mode</label>
+                        <select id="ui-blendMode" class="w-full bg-slate-800 border border-slate-600 rounded p-2 text-sm text-white focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none transition-colors">
+                            <option value="add">Add</option>
+                            <option value="multiply">Multiply</option>
+                            <option value="overlay">Overlay</option>
+                        </select>
+                    </div>
+
+                    <div id="group-opacity">
+                        <div class="flex justify-between mb-1">
+                            <label class="text-sm font-semibold text-white">Opacity</label>
+                            <span id="lbl-opacity" class="text-xs text-brand-400 font-mono">1.0</span>
+                        </div>
+                        <input type="range" id="ui-opacity" min="0.0" max="1.0" step="0.05" value="1.0">
+                    </div>
+
+                    <hr class="border-slate-700">
+
+                    <!-- Domain Warping -->
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="block text-sm font-semibold text-white">Domain Warping</label>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="ui-warpEnabled" class="sr-only peer">
+                                <div class="w-9 h-5 bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-500"></div>
+                            </label>
+                        </div>
+                        <div id="warpGroup" class="hidden space-y-4 mt-4 p-4 bg-slate-800/80 rounded border border-slate-700">
+                            <div>
+                                <label class="block text-xs text-slate-400 mb-1">Warp Map</label>
+                                <select id="ui-warpType" class="w-full bg-slate-800 border border-slate-600 rounded p-1.5 text-xs text-white focus:border-brand-500 outline-none">
+                                    <option value="perlin">Perlin Noise</option>
+                                    <option value="simplex">Simplex Noise</option>
+                                    <option value="fbm">fBm</option>
+                                    <option value="voronoi">Voronoi</option>
+                                    <option value="ridged">Ridged Multi-fractal</option>
+                                </select>
+                            </div>
+                            <div>
+                                <div class="flex justify-between mb-1">
+                                    <span class="text-xs text-slate-400">Strength</span>
+                                    <span id="lbl-warpStrength" class="text-xs text-brand-400 font-mono">0.5</span>
+                                </div>
+                                <input type="range" id="ui-warpStrength" min="0" max="5" step="0.1" value="0.5">
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="border-slate-700">
+
+                    <!-- Halftone-specific controls -->
+                    <div id="group-halftone" class="hidden space-y-4 p-4 bg-slate-800/80 rounded border border-slate-700">
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <label class="text-xs text-slate-400">Dot Size</label>
+                                <span id="lbl-dotSize" class="text-xs text-brand-400 font-mono">0.5</span>
+                            </div>
+                            <input type="range" id="ui-dotSize" min="0.1" max="1.0" step="0.05" value="0.5">
+                        </div>
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <label class="text-xs text-slate-400">Value Influence <span class="text-slate-500">(size from layer below)</span></label>
+                                <span id="lbl-valueInfluence-ht" class="text-xs text-brand-400 font-mono">0.0</span>
+                            </div>
+                            <input type="range" id="ui-valueInfluence-ht" min="0" max="1" step="0.01" value="0">
+                        </div>
+                    </div>
+
+                    <!-- Hatch-specific controls -->
+                    <div id="group-hatch" class="hidden space-y-4 p-4 bg-slate-800/80 rounded border border-slate-700">
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <label class="text-xs text-slate-400">Hatch Frequency</label>
+                                <span id="lbl-hatchFrequency" class="text-xs text-brand-400 font-mono">10.0</span>
+                            </div>
+                            <input type="range" id="ui-hatchFrequency" min="1" max="50" step="0.5" value="10">
+                        </div>
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <label class="text-xs text-slate-400">Hatch Angle</label>
+                                <span id="lbl-hatchAngle" class="text-xs text-brand-400 font-mono">45°</span>
+                            </div>
+                            <input type="range" id="ui-hatchAngle" min="0" max="180" step="1" value="45">
+                        </div>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="ui-crossHatch" class="w-3.5 h-3.5 text-brand-500 rounded bg-slate-900 border-slate-700 focus:ring-brand-500">
+                            <span class="text-xs text-slate-300">Cross Hatch</span>
+                        </label>
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <label class="text-xs text-slate-400">Value Influence <span class="text-slate-500">(thickness from layer below)</span></label>
+                                <span id="lbl-valueInfluence-ht2" class="text-xs text-brand-400 font-mono">0.0</span>
+                            </div>
+                            <input type="range" id="ui-valueInfluence-ht2" min="0" max="1" step="0.01" value="0">
+                        </div>
+                    </div>
+
+                    <!-- Sliders -->
+                    <div class="space-y-4">
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <label class="text-sm font-semibold text-white">Scale (Zoom)</label>
+                                <span id="lbl-scale" class="text-xs text-brand-400 font-mono">5.0</span>
+                            </div>
+                            <input type="range" id="ui-scale" min="0.5" max="30" step="0.1" value="5.0">
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <div class="flex justify-between mb-1">
+                                    <label class="text-xs text-slate-400">Scale X</label>
+                                    <span id="lbl-scaleX" class="text-xs text-brand-400 font-mono">1.0</span>
+                                </div>
+                                <input type="range" id="ui-scaleX" min="0.1" max="10" step="0.1" value="1.0">
+                            </div>
+                            <div>
+                                <div class="flex justify-between mb-1">
+                                    <label class="text-xs text-slate-400">Scale Y</label>
+                                    <span id="lbl-scaleY" class="text-xs text-brand-400 font-mono">1.0</span>
+                                </div>
+                                <input type="range" id="ui-scaleY" min="0.1" max="10" step="0.1" value="1.0">
+                            </div>
+                        </div>
+                        
+                        <div id="group-octaves">
+                            <div class="flex justify-between mb-1">
+                                <label class="text-sm font-semibold text-white">Octaves</label>
+                                <span id="lbl-octaves" class="text-xs text-brand-400 font-mono">4</span>
+                            </div>
+                            <input type="range" id="ui-octaves" min="1" max="8" step="1" value="4">
+                        </div>
+
+                        <div id="group-persistence">
+                            <div class="flex justify-between mb-1">
+                                <label class="text-sm font-semibold text-white">Persistence</label>
+                                <span id="lbl-persistence" class="text-xs text-brand-400 font-mono">0.5</span>
+                            </div>
+                            <input type="range" id="ui-persistence" min="0.1" max="1" step="0.05" value="0.5">
+                        </div>
+
+                        <div id="group-lacunarity">
+                            <div class="flex justify-between mb-1">
+                                <label class="text-sm font-semibold text-white">Lacunarity</label>
+                                <span id="lbl-lacunarity" class="text-xs text-brand-400 font-mono">2.0</span>
+                            </div>
+                            <input type="range" id="ui-lacunarity" min="1.0" max="4.0" step="0.1" value="2.0">
+                        </div>
+
+                        <div id="group-sharpness" class="hidden">
+                            <div class="flex justify-between mb-1">
+                                <label class="text-sm font-semibold text-white">Cell Sharpness</label>
+                                <span id="lbl-sharpness" class="text-xs text-brand-400 font-mono">0.8</span>
+                            </div>
+                            <input type="range" id="ui-sharpness" min="0" max="1" step="0.05" value="0.8">
+                        </div>
+                        
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <label class="text-sm font-semibold text-white">Time Speed</label>
+                                <span id="lbl-timeSpeed" class="text-xs text-brand-400 font-mono">0.2</span>
+                            </div>
+                            <input type="range" id="ui-timeSpeed" min="0" max="2" step="0.05" value="0.2">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <label class="text-sm font-semibold text-white">Time Direction</label>
+                                <span id="lbl-timeDirection" class="text-xs text-brand-400 font-mono">45°</span>
+                            </div>
+                            <input type="range" id="ui-timeDirection" min="0" max="360" step="1" value="45">
+                        </div>
+                        
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <label class="text-sm font-semibold text-white">Rotation Speed</label>
+                                <span id="lbl-rotationSpeed" class="text-xs text-brand-400 font-mono">0.0</span>
+                            </div>
+                            <input type="range" id="ui-rotationSpeed" min="-2.0" max="2.0" step="0.1" value="0.0">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <label class="text-sm font-semibold text-white">Layer Seed</label>
+                                <span id="lbl-seed" class="text-xs text-brand-400 font-mono">0</span>
+                            </div>
+                            <input type="range" id="ui-seed" min="0" max="1000" step="1" value="0">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Content -->
+    <div class="flex-1 flex flex-col min-w-0 bg-transparent p-8 overflow-y-auto z-10 relative">
+        <div class="max-w-[1400px] mx-auto w-full flex flex-col lg:flex-row gap-8">
+            
+            <!-- Canvas Column -->
+            <div class="flex flex-col items-center shrink-0">
+                <div class="flex justify-between items-end w-[512px] mb-2">
+                    <label class="text-sm font-semibold text-white">Preview</label>
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs text-slate-400">Resolution:</span>
+                        <select id="ui-resolution" class="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white outline-none focus:border-brand-500">
+                            <option value="256">256 x 256</option>
+                            <option value="512" selected>512 x 512</option>
+                            <option value="1024">1024 x 1024</option>
+                            <option value="2048">2048 x 2048</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="relative rounded-lg p-[2px] bg-gradient-to-br from-slate-600 to-slate-800 shadow-2xl w-[512px] h-[512px]">
+                    <canvas id="glcanvas" width="512" height="512" class="rounded-md bg-black w-full h-full block shadow-[0_0_40px_rgba(6,182,212,0.1)]"></canvas>
+                </div>
+                
+                <button id="btn-download" class="mt-6 flex items-center gap-2 px-6 py-3 bg-brand-600 hover:bg-brand-500 text-white font-semibold rounded shadow-lg transition-transform active:scale-95">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    Download Texture
+                </button>
+            </div>
+
+            <!-- Code Export Column -->
+            <div class="flex flex-col flex-1 max-h-[800px] min-w-0">
+                <div class="flex justify-between items-end mb-2">
+                    <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                        <svg class="w-5 h-5 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+                        Generated GLSL
+                    </h2>
+                    <button id="btn-copy-glsl" class="text-xs text-brand-400 hover:text-white hover:bg-brand-600 font-semibold px-3 py-1.5 bg-slate-800 rounded transition-colors border border-brand-500/30">
+                        Copy to Clipboard
+                    </button>
+                </div>
+                
+                <div class="flex-1 bg-slate-950 border border-slate-700 rounded-lg overflow-hidden flex flex-col shadow-inner relative group">
+                    <textarea id="codeOutput" readonly class="w-full h-full bg-transparent text-slate-300 font-mono text-xs p-4 focus:outline-none resize-none whitespace-pre" spellcheck="false"></textarea>
+                    <div class="absolute bottom-4 right-4 pointer-events-none opacity-20 group-hover:opacity-100 transition-opacity">
+                        <svg class="w-8 h-8 text-slate-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 2.5L18.5 10H13V4.5zM6 20V4h6v7h7v9H6z"/></svg>
+                    </div>
+                </div>
+                
+                <!-- Engine Translation Prompts -->
+                <div class="mt-4 p-5 bg-slate-800/50 rounded-lg border border-slate-700 shadow-sm">
+                    <h3 class="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        AI Engine Translation Prompts
+                    </h3>
+                    <div class="flex gap-3">
+                        <button id="btn-prompt-hlsl" class="flex-1 text-xs px-3 py-2.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-brand-500 text-white rounded transition-colors flex items-center justify-center gap-2 shadow-sm">
+                            <span class="font-bold text-slate-300">HLSL</span> Custom Node
+                        </button>
+                        <button id="btn-prompt-csharp" class="flex-1 text-xs px-3 py-2.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-brand-500 text-white rounded transition-colors flex items-center justify-center gap-2 shadow-sm">
+                            <span class="font-bold text-slate-300">C#</span> Static Method
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    
+    <!-- Application Logic -->
+    <script>
+        const GLSL_FUNCTIONS = {
+            core: `// --- UTILITIES ---
+vec2 hash22(vec2 p) {
+    p = vec2(dot(p,vec2(127.1,311.7)), dot(p,vec2(269.5,183.3)));
+    return -1.0 + 2.0 * fract(sin(p)*43758.5453123);
+}
+float hash12(vec2 p) {
+    float h = dot(p,vec2(127.1,311.7));
+    return fract(sin(h)*43758.5453123);
+}`,
+            perlin: `// --- PERLIN NOISE ---
+vec2 fade(vec2 t) { return t*t*t*(t*(t*6.0-15.0)+10.0); }
+float perlinNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = fade(f);
+    float a = dot(hash22(i + vec2(0.0,0.0)), f - vec2(0.0,0.0));
+    float b = dot(hash22(i + vec2(1.0,0.0)), f - vec2(1.0,0.0));
+    float c = dot(hash22(i + vec2(0.0,1.0)), f - vec2(0.0,1.0));
+    float d = dot(hash22(i + vec2(1.0,1.0)), f - vec2(1.0,1.0));
+    float res = mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    return res * 2.0;
+}`,
+            simplex: `// --- SIMPLEX NOISE ---
+float simplexNoise(vec2 p) {
+    const float K1 = 0.366025404; // (sqrt(3)-1)/2;
+    const float K2 = 0.211324865; // (3-sqrt(3))/6;
+    vec2 i = floor(p + (p.x + p.y) * K1);
+    vec2 a = p - i + (i.x + i.y) * K2;
+    float m = step(a.y, a.x); 
+    vec2 o = vec2(m, 1.0 - m);
+    vec2 b = a - o + K2;
+    vec2 c = a - 1.0 + 2.0 * K2;
+    vec3 h = max(0.5 - vec3(dot(a,a), dot(b,b), dot(c,c) ), 0.0);
+    vec3 n = h*h*h*h * vec3( dot(a,hash22(i+0.0)), dot(b,hash22(i+o)), dot(c,hash22(i+1.0)));
+    return dot(n, vec3(70.0));
+}`,
+            fbm: `// --- FRACTIONAL BROWNIAN MOTION (fBm) ---
+float fbm(vec2 p, int octaves, float persistence, float lacunarity) {
+    float total = 0.0;
+    float amplitude = 1.0;
+    float maxVal = 0.0;
+    vec2 st = p;
+    for(int i = 0; i < 8; i++) {
+        if(i >= octaves) break;
+        total += simplexNoise(st) * amplitude;
+        maxVal += amplitude;
+        amplitude *= persistence;
+        st *= lacunarity;
+    }
+    return (maxVal > 0.0) ? (total / maxVal) : 0.0;
+}`,
+            voronoi: `// --- VORONOI / CELLULAR ---
+float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5*(b-a)/k, 0.0, 1.0);
+    return mix(b, a, h) - k*h*(1.0-h);
+}
+float voronoi(vec2 p, float sharpness, float time) {
+    vec2 n = floor(p);
+    vec2 f = fract(p);
+    float res = 8.0;
+    float sm = 1.0 - sharpness;
+    for(int j=-1; j<=1; j++)
+    for(int i=-1; i<=1; i++) {
+        vec2 g = vec2(float(i),float(j));
+        vec2 o = hash22(n + g);
+        o = 0.5 + 0.5*sin(time + 6.2831*o); // Animate points
+        vec2 r = g + o - f;
+        float d = dot(r,r);
+        if (sm > 0.01) {
+            res = smin(res, d, sm * 0.5);
+        } else {
+            res = min(res, d);
+        }
+    }
+    return sqrt(res);
+}`,
+            ridged: `// --- RIDGED MULTI-FRACTAL ---
+float ridgedNoise(vec2 p, int octaves, float persistence, float lacunarity) {
+    float total = 0.0;
+    float amplitude = 1.0;
+    float maxVal = 0.0;
+    vec2 st = p;
+    float weight = 1.0;
+    for(int i = 0; i < 8; i++) {
+        if(i >= octaves) break;
+        float n = abs(simplexNoise(st));
+        n = 1.0 - n;
+        n *= n;
+        n *= weight;
+        weight = max(min(n * 2.0, 1.0), 0.0);
+        total += n * amplitude;
+        maxVal += amplitude;
+        amplitude *= persistence;
+        st *= lacunarity;
+    }
+    return (maxVal > 0.0) ? (total / maxVal) : 0.0;
+}`,
+            curl: `// --- CURL NOISE ---
+vec2 curlNoise(vec2 p) {
+    float eps = 0.001;
+    float n1, n2, a, b;
+    n1 = simplexNoise(p + vec2(0.0, eps));
+    n2 = simplexNoise(p - vec2(0.0, eps));
+    a = (n1 - n2) / (2.0 * eps);
+    n1 = simplexNoise(p + vec2(eps, 0.0));
+    n2 = simplexNoise(p - vec2(eps, 0.0));
+    b = (n1 - n2) / (2.0 * eps);
+    return vec2(a, -b);
+}`,
+            blue: `// --- BLUE NOISE (Approximation) ---
+float blueNoise(vec2 p) {
+    float v = hash12(p * 100.0);
+    float v2 = hash12(p * 100.0 + vec2(1.0, 0.0));
+    float v3 = hash12(p * 100.0 + vec2(0.0, 1.0));
+    return clamp(v - (v2+v3)*0.25, 0.0, 1.0);
+}`,
+            halftone: `// --- HALFTONE / DOTS ---
+float halftoneNoise(vec2 p, float dotSize, float underlyingValue, float influence) {
+    vec2 cell = floor(p);
+    vec2 f    = fract(p);
+    float hashVal  = hash12(cell); // per-cell random [0,1]
+    float driver   = mix(hashVal, clamp(underlyingValue, 0.0, 1.0), influence);
+    float radius   = driver * dotSize * 0.5;
+    float dist     = length(f - 0.5);
+    return 1.0 - smoothstep(radius - 0.01, radius + 0.01, dist);
+}`,
+            hatch: `// --- HATCHING / LINES ---
+float hatchNoise(vec2 p, float freq, float angleDeg, bool crossHatch, float underlyingValue, float influence) {
+    float a = radians(angleDeg);
+    float ca = cos(a), sa = sin(a);
+    float hashVal = hash12(floor(p));
+    float rawBand = 0.5 + hashVal * 0.5;  // hash-based band [0.5, 1.0]
+    float band = mix(rawBand, clamp(underlyingValue, 0.0, 1.0), influence);
+    // Primary direction
+    float s1 = fract((p.x * ca + p.y * sa) * freq);
+    float line1 = 1.0 - smoothstep(band - 0.05, band, s1);
+    if (!crossHatch) return line1;
+    // Cross direction (perpendicular)
+    float s2 = fract((-p.x * sa + p.y * ca) * freq);
+    float line2 = 1.0 - smoothstep(band - 0.05, band, s2);
+    return max(line1, line2);
+}`,
+            square: `// --- SQUARE / VALUE NOISE ---
+float squareNoise(vec2 p) {
+    return hash12(floor(p));
+}`
+        };
+
+        const VERTEX_SHADER_SRC = `#version 300 es
+in vec4 aPosition;
+out vec2 vUv;
+void main() {
+    vUv = aPosition.xy * 0.5 + 0.5;
+    gl_Position = aPosition;
+}
+`;
+
+        function hslToHex(h, s, l) {
+            l /= 100;
+            const a = s * Math.min(l, 1 - l) / 100;
+            const f = n => {
+                const k = (n + h / 30) % 12;
+                const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+                return Math.round(255 * color).toString(16).padStart(2, '0');
+            };
+            return `#${f(0)}${f(8)}${f(4)}`;
+        }
+
+        class NoiseApp {
+            constructor() {
+                this.canvas = document.getElementById('glcanvas');
+                // CRITICAL: preserveDrawingBuffer must be true for image export to work.
+                this.gl = this.canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+                if (!this.gl) {
+                    alert("WebGL 2 not supported in your browser.");
+                    return;
+                }
+
+                this.state = {
+                    activeLayerIndex: 0,
+                    layers: [
+                        {
+                            noiseType: 'simplex',
+                            blendMode: 'add',
+                            opacity: 1.0,
+                            warpEnabled: false,
+                            warpType: 'simplex',
+                            warpStrength: 0.5,
+                            scale: 5.0,
+                            scaleX: 1.0,
+                            scaleY: 1.0,
+                            octaves: 4,
+                            persistence: 0.5,
+                            lacunarity: 2.0,
+                            sharpness: 0.8,
+                            timeSpeed: 0.2,
+                            timeDirection: 45.0,
+                            time: 0.0,
+                            rotationSpeed: 0.0,
+                            seed: 0.0,
+                            dotSize: 0.5,
+                            hatchFrequency: 10.0,
+                            hatchAngle: 45.0,
+                            crossHatch: false,
+                            valueInfluence: 0.0
+                        }
+                    ],
+                    outputMode: 'grayscale',
+                    soloLayer: false,
+                    colors: ['#000000', '#888888', '#ffffff']
+                };
+
+                this.program = null;
+                this.lastTime = performance.now();
+
+                this.initGeometry();
+                this.bindUI();
+                
+                // Initialize resolution
+                const res = parseInt(document.getElementById('ui-resolution').value) || 512;
+                this.canvas.width = res;
+                this.canvas.height = res;
+                
+                this.updateShader(); 
+                requestAnimationFrame(this.render.bind(this));
+            }
+
+            initGeometry() {
+                const gl = this.gl;
+                const buffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+                const verts = new Float32Array([
+                    -1, -1,  1, -1, -1,  1,
+                    -1,  1,  1, -1,  1,  1
+                ]);
+                gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+                this.vbo = buffer;
+            }
+
+            renderColorStops() {
+                const container = document.getElementById('color-stops-container');
+                container.innerHTML = '';
+                this.state.colors.forEach((c, i) => {
+                    const input = document.createElement('input');
+                    input.type = 'color';
+                    input.value = c;
+                    input.className = 'flex-1 h-8 rounded bg-transparent cursor-pointer min-w-[24px] border-0 p-0';
+                    input.title = `Step ${i} (${(i / Math.max(1, this.state.colors.length - 1)).toFixed(2)})`;
+                    input.addEventListener('input', (e) => {
+                        this.state.colors[i] = e.target.value;
+                        this.updateExportedCode();
+                    });
+                    container.appendChild(input);
+                });
+            }
+
+            generateRandomPalette() {
+                const numSteps = this.state.colors.length;
+                const baseHue = Math.random() * 360;
+                
+                // 0: Monochromatic, 1: Analogous, 2: Complementary, 3: Triadic
+                const harmonyType = Math.floor(Math.random() * 4);
+                let hueOffsets = [0];
+                if (harmonyType === 1) hueOffsets = [0, 30, -30, 60, -60];
+                else if (harmonyType === 2) hueOffsets = [0, 180];
+                else if (harmonyType === 3) hueOffsets = [0, 120, 240];
+
+                for (let i = 0; i < numSteps; i++) {
+                    const t = numSteps > 1 ? i / (numSteps - 1) : 0;
+                    // Dark to light for heightmap readability
+                    const lightness = 10 + t * 80; 
+                    
+                    const offset = hueOffsets[i % hueOffsets.length];
+                    const hue = (baseHue + offset + 360) % 360;
+                    
+                    const saturation = 40 + Math.random() * 40; 
+                    
+                    this.state.colors[i] = hslToHex(hue, saturation, lightness);
+                }
+                this.renderColorStops();
+                this.updateExportedCode();
+            }
+
+            renderLayerTabs() {
+                const container = document.getElementById('layer-tabs-container');
+                container.innerHTML = '';
+                this.state.layers.forEach((layer, i) => {
+                    const btn = document.createElement('button');
+                    btn.className = `px-3 py-1 text-xs font-bold rounded transition-colors ${i === this.state.activeLayerIndex ? 'bg-brand-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`;
+                    btn.innerText = `Layer ${i + 1}`;
+                    btn.onclick = () => {
+                        this.state.activeLayerIndex = i;
+                        this.syncUIToState();
+                        this.renderLayerTabs();
+                    };
+                    container.appendChild(btn);
+                });
+            }
+
+            syncUIToState() {
+                const layer = this.state.layers[this.state.activeLayerIndex];
+                
+                document.getElementById('ui-noiseType').value = layer.noiseType;
+                document.getElementById('ui-blendMode').value = layer.blendMode;
+                document.getElementById('ui-opacity').value = layer.opacity;
+                document.getElementById('lbl-opacity').innerText = layer.opacity.toFixed(2);
+                
+                document.getElementById('ui-warpEnabled').checked = layer.warpEnabled;
+                document.getElementById('ui-warpType').value = layer.warpType;
+                document.getElementById('ui-warpStrength').value = layer.warpStrength;
+                document.getElementById('lbl-warpStrength').innerText = layer.warpStrength.toFixed(2);
+                
+                document.getElementById('ui-scale').value = layer.scale;
+                document.getElementById('lbl-scale').innerText = layer.scale.toFixed(2);
+
+                document.getElementById('ui-scaleX').value = layer.scaleX;
+                document.getElementById('lbl-scaleX').innerText = layer.scaleX.toFixed(2);
+                document.getElementById('ui-scaleY').value = layer.scaleY;
+                document.getElementById('lbl-scaleY').innerText = layer.scaleY.toFixed(2);
+                
+                document.getElementById('ui-octaves').value = layer.octaves;
+                document.getElementById('lbl-octaves').innerText = layer.octaves;
+                
+                document.getElementById('ui-persistence').value = layer.persistence;
+                document.getElementById('lbl-persistence').innerText = layer.persistence.toFixed(2);
+                
+                document.getElementById('ui-lacunarity').value = layer.lacunarity;
+                document.getElementById('lbl-lacunarity').innerText = layer.lacunarity.toFixed(2);
+                
+                document.getElementById('ui-sharpness').value = layer.sharpness;
+                document.getElementById('lbl-sharpness').innerText = layer.sharpness.toFixed(2);
+                
+                document.getElementById('ui-timeSpeed').value = layer.timeSpeed;
+                document.getElementById('lbl-timeSpeed').innerText = layer.timeSpeed.toFixed(2);
+                
+                document.getElementById('ui-timeDirection').value = layer.timeDirection;
+                document.getElementById('lbl-timeDirection').innerText = layer.timeDirection + '°';
+                
+                document.getElementById('ui-rotationSpeed').value = layer.rotationSpeed;
+                document.getElementById('lbl-rotationSpeed').innerText = layer.rotationSpeed.toFixed(2);
+
+                document.getElementById('ui-seed').value = layer.seed;
+                document.getElementById('lbl-seed').innerText = layer.seed;
+
+                document.getElementById('ui-dotSize').value = layer.dotSize;
+                document.getElementById('lbl-dotSize').innerText = layer.dotSize.toFixed(2);
+                document.getElementById('ui-hatchFrequency').value = layer.hatchFrequency;
+                document.getElementById('lbl-hatchFrequency').innerText = layer.hatchFrequency.toFixed(1);
+                document.getElementById('ui-hatchAngle').value = layer.hatchAngle;
+                document.getElementById('lbl-hatchAngle').innerText = layer.hatchAngle + '°';
+                document.getElementById('ui-crossHatch').checked = layer.crossHatch;
+                // sync both value influence sliders
+                const vi = (layer.valueInfluence ?? 0).toFixed(2);
+                document.getElementById('ui-valueInfluence-ht').value = layer.valueInfluence ?? 0;
+                document.getElementById('lbl-valueInfluence-ht').innerText = vi;
+                document.getElementById('ui-valueInfluence-ht2').value = layer.valueInfluence ?? 0;
+                document.getElementById('lbl-valueInfluence-ht2').innerText = vi;
+                
+                document.getElementById('ui-outputMode').value = this.state.outputMode;
+                
+                this.updateUIVisibility();
+            }
+
+            bindUI() {
+                const bindLayerSelect = (id, prop) => {
+                    const el = document.getElementById('ui-' + id);
+                    el.addEventListener('change', (e) => {
+                        this.state.layers[this.state.activeLayerIndex][prop] = e.target.value;
+                        this.updateShader();
+                        this.updateUIVisibility();
+                    });
+                };
+                
+                const bindLayerRange = (id, prop) => {
+                    const el = document.getElementById('ui-' + id);
+                    const lbl = document.getElementById('lbl-' + id);
+                    el.addEventListener('input', (e) => {
+                        let val = parseFloat(e.target.value);
+                        this.state.layers[this.state.activeLayerIndex][prop] = val;
+                        if (id === 'timeDirection') {
+                            lbl.innerText = val + '°';
+                        } else {
+                            lbl.innerText = (id === 'octaves' || id === 'seed') ? val : val.toFixed(2);
+                        }
+                        this.updateExportedCode(); 
+                    });
+                };
+
+                const bindLayerToggle = (id, prop) => {
+                    const el = document.getElementById('ui-' + id);
+                    el.addEventListener('change', (e) => {
+                        this.state.layers[this.state.activeLayerIndex][prop] = e.target.checked;
+                        this.updateShader();
+                        this.updateUIVisibility();
+                    });
+                };
+
+                bindLayerSelect('noiseType', 'noiseType');
+                bindLayerSelect('blendMode', 'blendMode');
+                bindLayerSelect('warpType', 'warpType');
+                bindLayerToggle('warpEnabled', 'warpEnabled');
+                bindLayerRange('opacity', 'opacity');
+                bindLayerRange('warpStrength', 'warpStrength');
+                bindLayerRange('scale', 'scale');
+                bindLayerRange('scaleX', 'scaleX');
+                bindLayerRange('scaleY', 'scaleY');
+                bindLayerRange('octaves', 'octaves');
+                bindLayerRange('persistence', 'persistence');
+                bindLayerRange('lacunarity', 'lacunarity');
+                bindLayerRange('sharpness', 'sharpness');
+                bindLayerRange('timeSpeed', 'timeSpeed');
+                bindLayerRange('timeDirection', 'timeDirection');
+                bindLayerRange('rotationSpeed', 'rotationSpeed');
+                bindLayerRange('seed', 'seed');
+                bindLayerRange('dotSize', 'dotSize');
+                bindLayerRange('hatchFrequency', 'hatchFrequency');
+
+                // hatchAngle special label
+                {
+                    const el = document.getElementById('ui-hatchAngle');
+                    const lbl = document.getElementById('lbl-hatchAngle');
+                    el.addEventListener('input', (e) => {
+                        const val = parseFloat(e.target.value);
+                        this.state.layers[this.state.activeLayerIndex].hatchAngle = val;
+                        lbl.innerText = val + '°';
+                        this.updateExportedCode();
+                    });
+                }
+
+                bindLayerToggle('crossHatch', 'crossHatch');
+
+                // Value Influence — two sliders (halftone & hatch groups) share one layer property
+                const bindValueInfluence = (id, lblId) => {
+                    const el = document.getElementById(id);
+                    const lbl = document.getElementById(lblId);
+                    el.addEventListener('input', (e) => {
+                        const val = parseFloat(e.target.value);
+                        this.state.layers[this.state.activeLayerIndex].valueInfluence = val;
+                        lbl.innerText = val.toFixed(2);
+                        // keep the other slider in sync
+                        const otherId = id === 'ui-valueInfluence-ht' ? 'ui-valueInfluence-ht2' : 'ui-valueInfluence-ht';
+                        const otherLblId = lblId === 'lbl-valueInfluence-ht' ? 'lbl-valueInfluence-ht2' : 'lbl-valueInfluence-ht';
+                        document.getElementById(otherId).value = val;
+                        document.getElementById(otherLblId).innerText = val.toFixed(2);
+                        this.updateExportedCode();
+                    });
+                };
+                bindValueInfluence('ui-valueInfluence-ht', 'lbl-valueInfluence-ht');
+                bindValueInfluence('ui-valueInfluence-ht2', 'lbl-valueInfluence-ht2');
+                document.getElementById('ui-outputMode').addEventListener('change', (e) => {
+                    this.state.outputMode = e.target.value;
+                    this.updateShader();
+                    this.updateUIVisibility();
+                });
+
+                document.getElementById('btn-add-layer').addEventListener('click', () => {
+                    if (this.state.layers.length < 8) {
+                        this.state.layers.push(JSON.parse(JSON.stringify(this.state.layers[this.state.activeLayerIndex])));
+                        this.state.activeLayerIndex = this.state.layers.length - 1;
+                        this.renderLayerTabs();
+                        this.syncUIToState();
+                        this.updateShader();
+                    }
+                });
+
+                document.getElementById('btn-remove-layer').addEventListener('click', () => {
+                    if (this.state.layers.length > 1) {
+                        this.state.layers.splice(this.state.activeLayerIndex, 1);
+                        this.state.activeLayerIndex = Math.max(0, this.state.activeLayerIndex - 1);
+                        this.renderLayerTabs();
+                        this.syncUIToState();
+                        this.updateShader();
+                    }
+                });
+
+                document.getElementById('ui-resolution').addEventListener('change', (e) => {
+                    const res = parseInt(e.target.value);
+                    this.canvas.width = res;
+                    this.canvas.height = res;
+                    this.render(performance.now(), true);
+                });
+
+                document.getElementById('ui-soloLayer').addEventListener('change', (e) => {
+                    this.state.soloLayer = e.target.checked;
+                    this.updateShader();
+                    this.render(performance.now(), true);
+                });
+
+                this.renderLayerTabs();
+                this.syncUIToState();
+
+                document.getElementById('btn-add-color').addEventListener('click', () => {
+                    if (this.state.colors.length < 16) {
+                        this.state.colors.push('#ffffff');
+                        this.renderColorStops();
+                        this.updateExportedCode();
+                    }
+                });
+                
+                document.getElementById('btn-remove-color').addEventListener('click', () => {
+                    if (this.state.colors.length > 2) {
+                        this.state.colors.pop();
+                        this.renderColorStops();
+                        this.updateExportedCode();
+                    }
+                });
+
+                document.getElementById('btn-random-palette').addEventListener('click', () => {
+                    this.generateRandomPalette();
+                });
+                
+                this.renderColorStops();
+
+                document.getElementById('btn-download').addEventListener('click', () => {
+                    this.render(0, true); 
+                    const dataURL = this.canvas.toDataURL('image/png');
+                    const a = document.createElement('a');
+                    a.href = dataURL;
+                    a.download = 'noise_map.png';
+                    a.click();
+                });
+
+                document.getElementById('btn-copy-glsl').addEventListener('click', (e) => {
+                    navigator.clipboard.writeText(document.getElementById('codeOutput').value);
+                    const orig = e.target.innerText;
+                    e.target.innerText = "Copied!";
+                    setTimeout(() => e.target.innerText = orig, 1500);
+                });
+
+                document.getElementById('btn-prompt-hlsl').addEventListener('click', (e) => {
+                    const code = document.getElementById('codeOutput').value;
+                    const prompt = `Translate the following GLSL into an HLSL Custom Function Node for a game engine: \n\n` + code;
+                    navigator.clipboard.writeText(prompt);
+                    const orig = e.target.innerHTML;
+                    e.target.innerHTML = "Copied!";
+                    setTimeout(() => e.target.innerHTML = orig, 1500);
+                });
+
+                document.getElementById('btn-prompt-csharp').addEventListener('click', (e) => {
+                    const code = document.getElementById('codeOutput').value;
+                    const prompt = `Convert the following GLSL algorithm into a static performant C# method: \n\n` + code;
+                    navigator.clipboard.writeText(prompt);
+                    const orig = e.target.innerHTML;
+                    e.target.innerHTML = "Copied!";
+                    setTimeout(() => e.target.innerHTML = orig, 1500);
+                });
+
+                this.updateUIVisibility();
+            }
+
+            updateUIVisibility() {
+                const layer = this.state.layers[this.state.activeLayerIndex];
+                const nt = layer.noiseType;
+                const usesFractal = ['fbm', 'ridged'].includes(nt) || 
+                                    (layer.warpEnabled && ['fbm', 'ridged'].includes(layer.warpType));
+                
+                document.getElementById('group-octaves').style.display = usesFractal ? 'block' : 'none';
+                document.getElementById('group-persistence').style.display = usesFractal ? 'block' : 'none';
+                document.getElementById('group-lacunarity').style.display = usesFractal ? 'block' : 'none';
+
+                const usesVoronoi = nt === 'voronoi' || (layer.warpEnabled && layer.warpType === 'voronoi');
+                document.getElementById('group-sharpness').style.display = usesVoronoi ? 'block' : 'none';
+                document.getElementById('warpGroup').style.display = layer.warpEnabled ? 'block' : 'none';
+                
+                document.getElementById('group-halftone').style.display = nt === 'halftone' ? 'block' : 'none';
+                document.getElementById('group-hatch').style.display = nt === 'hatch' ? 'block' : 'none';
+                
+                const hasCurl = this.state.layers.some(l => l.noiseType === 'curl');
+                document.getElementById('group-tint').style.display = (this.state.outputMode === 'grayscale' && !hasCurl) ? 'block' : 'none';
+            }
+
+            getTypeIndex(type) {
+                const map = { 'perlin': 0, 'simplex': 1, 'fbm': 2, 'voronoi': 3, 'ridged': 4, 'curl': 5, 'blue': 6, 'halftone': 7, 'hatch': 8, 'square': 9 };
+                return map[type] !== undefined ? map[type] : 0;
+            }
+
+            getBlendModeIndex(mode) {
+                const map = { 'add': 0, 'multiply': 1, 'overlay': 2 };
+                return map[mode] || 0;
+            }
+
+            buildFragmentShader(forExport = false) {
+                const s = this.state;
+                const numLayers = s.layers.length;
+                let src = `#version 300 es\nprecision highp float;\n`;
+                
+                if (!forExport) {
+                    src += `in vec2 vUv;\nout vec4 fragColor;\n`;
+                }
+
+                src += `
+// --- SETTINGS ---
+const int NUM_LAYERS = ${numLayers};
+${forExport ? `const bool u_soloLayer = false;\nconst int u_activeLayer = 0;` : `uniform bool u_soloLayer;\nuniform int u_activeLayer;`}
+`;
+
+                if (forExport) {
+                    src += `
+// Layer Settings (Hardcoded for export)
+int u_noiseType[NUM_LAYERS] = int[](${s.layers.map(l => this.getTypeIndex(l.noiseType)).join(', ')});
+int u_blendMode[NUM_LAYERS] = int[](${s.layers.map(l => this.getBlendModeIndex(l.blendMode)).join(', ')});
+float u_opacity[NUM_LAYERS] = float[](${s.layers.map(l => l.opacity.toFixed(3)).join(', ')});
+bool u_warpEnabled[NUM_LAYERS] = bool[](${s.layers.map(l => l.warpEnabled ? 'true' : 'false').join(', ')});
+int u_warpType[NUM_LAYERS] = int[](${s.layers.map(l => this.getTypeIndex(l.warpType)).join(', ')});
+float u_warpStrength[NUM_LAYERS] = float[](${s.layers.map(l => l.warpStrength.toFixed(3)).join(', ')});
+float u_scale[NUM_LAYERS] = float[](${s.layers.map(l => l.scale.toFixed(3)).join(', ')});
+float u_scaleX[NUM_LAYERS] = float[](${s.layers.map(l => l.scaleX.toFixed(3)).join(', ')});
+float u_scaleY[NUM_LAYERS] = float[](${s.layers.map(l => l.scaleY.toFixed(3)).join(', ')});
+int u_octaves[NUM_LAYERS] = int[](${s.layers.map(l => l.octaves).join(', ')});
+float u_persistence[NUM_LAYERS] = float[](${s.layers.map(l => l.persistence.toFixed(3)).join(', ')});
+float u_lacunarity[NUM_LAYERS] = float[](${s.layers.map(l => l.lacunarity.toFixed(3)).join(', ')});
+float u_sharpness[NUM_LAYERS] = float[](${s.layers.map(l => l.sharpness.toFixed(3)).join(', ')});
+float u_time[NUM_LAYERS] = float[](${s.layers.map(l => l.time.toFixed(3)).join(', ')});
+float u_dotSize[NUM_LAYERS] = float[](${s.layers.map(l => l.dotSize.toFixed(3)).join(', ')});
+float u_hatchFrequency[NUM_LAYERS] = float[](${s.layers.map(l => l.hatchFrequency.toFixed(3)).join(', ')});
+float u_hatchAngle[NUM_LAYERS] = float[](${s.layers.map(l => l.hatchAngle.toFixed(3)).join(', ')});
+bool u_crossHatch[NUM_LAYERS] = bool[](${s.layers.map(l => l.crossHatch ? 'true' : 'false').join(', ')});
+float u_valueInfluence[NUM_LAYERS] = float[](${s.layers.map(l => l.valueInfluence.toFixed(3)).join(', ')});
+`;
+                } else {
+                    src += `
+uniform int u_noiseType[8];
+uniform int u_blendMode[8];
+uniform float u_opacity[8];
+uniform bool u_warpEnabled[8];
+uniform int u_warpType[8];
+uniform float u_warpStrength[8];
+uniform float u_scale[8];
+uniform float u_scaleX[8];
+uniform float u_scaleY[8];
+uniform int u_octaves[8];
+uniform float u_persistence[8];
+uniform float u_lacunarity[8];
+uniform float u_sharpness[8];
+uniform float u_time[8];
+uniform float u_timeDirection[8];
+uniform float u_rotationSpeed[8];
+uniform vec2 u_seedOffset[8];
+uniform float u_dotSize[8];
+uniform float u_hatchFrequency[8];
+uniform float u_hatchAngle[8];
+uniform bool u_crossHatch[8];
+uniform float u_valueInfluence[8];
+uniform vec3 u_colors[16];
+uniform int u_numColors;
+`;
+                }
+
+                src += '\n' + GLSL_FUNCTIONS.core + '\n';
+                
+                const types = new Set();
+                s.layers.forEach(l => {
+                    types.add(l.noiseType);
+                    if (l.warpEnabled) types.add(l.warpType);
+                });
+
+                if (types.has('perlin')) src += '\n' + GLSL_FUNCTIONS.perlin + '\n';
+                if (types.has('simplex') || types.has('fbm') || types.has('ridged') || types.has('curl')) {
+                    src += '\n' + GLSL_FUNCTIONS.simplex + '\n';
+                }
+                if (types.has('fbm')) src += '\n' + GLSL_FUNCTIONS.fbm + '\n';
+                if (types.has('voronoi')) src += '\n' + GLSL_FUNCTIONS.voronoi + '\n';
+                if (types.has('ridged')) src += '\n' + GLSL_FUNCTIONS.ridged + '\n';
+                if (types.has('curl')) src += '\n' + GLSL_FUNCTIONS.curl + '\n';
+                if (types.has('blue')) src += '\n' + GLSL_FUNCTIONS.blue + '\n';
+                if (types.has('halftone')) src += '\n' + GLSL_FUNCTIONS.halftone + '\n';
+                if (types.has('hatch')) src += '\n' + GLSL_FUNCTIONS.hatch + '\n';
+                if (types.has('square')) src += '\n' + GLSL_FUNCTIONS.square + '\n';
+
+                src += `
+// Helper to evaluate chosen noise map
+vec3 evaluateNoise(vec2 p, int type, int octaves, float persistence, float lacunarity, float sharpness, float time, float dotSize, float hatchFreq, float hatchAngle, bool crossHatch, float underlyingValue, float valueInfluence) {
+`;
+                if (types.has('perlin')) src += `    if (type == 0) return vec3(perlinNoise(p));\n`;
+                if (types.has('simplex') || types.has('fbm') || types.has('ridged') || types.has('curl')) src += `    if (type == 1) return vec3(simplexNoise(p));\n`;
+                if (types.has('fbm')) src += `    if (type == 2) return vec3(fbm(p, octaves, persistence, lacunarity));\n`;
+                if (types.has('voronoi')) src += `    if (type == 3) return vec3(voronoi(p, sharpness, time));\n`;
+                if (types.has('ridged')) src += `    if (type == 4) return vec3(ridgedNoise(p, octaves, persistence, lacunarity));\n`;
+                if (types.has('curl')) src += `    if (type == 5) return vec3(curlNoise(p), 0.0);\n`;
+                if (types.has('blue')) src += `    if (type == 6) return vec3(blueNoise(p));\n`;
+                if (types.has('halftone')) src += `    if (type == 7) return vec3(halftoneNoise(p, dotSize, underlyingValue, valueInfluence));\n`;
+                if (types.has('hatch')) src += `    if (type == 8) return vec3(hatchNoise(p, hatchFreq, hatchAngle, crossHatch, underlyingValue, valueInfluence));\n`;
+                if (types.has('square')) src += `    if (type == 9) return vec3(squareNoise(p));\n`;
+                src += `    return vec3(0.0);
+}
+
+// Blend functions
+vec3 blendOverlay(vec3 base, vec3 blend) {
+    return mix(
+        1.0 - 2.0 * (1.0 - base) * (1.0 - blend),
+        2.0 * base * blend,
+        step(base, vec3(0.5))
+    );
+}
+
+vec3 getCompositeNoise(vec2 uv) {
+    vec3 composite = vec3(0.0);
+    for (int i = 0; i < NUM_LAYERS; i++) {
+        if (u_soloLayer && i != u_activeLayer) continue;
+
+        vec2 p = uv - 0.5; // Center
+        
+        // Apply rotation
+        float angle = u_time[i] * u_rotationSpeed[i];
+        if (angle != 0.0) {
+            float c = cos(angle);
+            float s = sin(angle);
+            p = mat2(c, -s, s, c) * p;
+        }
+
+        // Apply scale (anisotropic X/Y first, then isotropic zoom)
+        p *= vec2(u_scaleX[i], u_scaleY[i]);
+        p *= u_scale[i];
+
+        // Apply Seed offset (calculated on CPU to prevent float precision loss)
+        p += u_seedOffset[i];
+
+        // Apply animated panning
+        float dir = radians(u_timeDirection[i]);
+        p += u_time[i] * vec2(cos(dir), sin(dir));
+        
+        if (u_warpEnabled[i]) {
+            vec3 warp = evaluateNoise(p, u_warpType[i], u_octaves[i], u_persistence[i], u_lacunarity[i], u_sharpness[i], u_time[i], u_dotSize[i], u_hatchFrequency[i], u_hatchAngle[i], u_crossHatch[i], 0.0, 0.0);
+            p += warp.xy * u_warpStrength[i];
+        }
+        
+        // Capture the composite accumulated so far as the value that modulates this layer
+        float underVal = clamp(composite.r, 0.0, 1.0);
+        
+        vec3 val = evaluateNoise(p, u_noiseType[i], u_octaves[i], u_persistence[i], u_lacunarity[i], u_sharpness[i], u_time[i], u_dotSize[i], u_hatchFrequency[i], u_hatchAngle[i], u_crossHatch[i], underVal, u_valueInfluence[i]);
+        
+        // Remap scalar types from [-1,1] to [0,1]. Types 7/8/9 already in [0,1].
+        int t = u_noiseType[i];
+        if (t == 0 || t == 1 || t == 2) {
+            val = val * 0.5 + 0.5;
+        } else if (t == 5) {
+            val = val * 0.5 + 0.5; // Remap curl vector
+        }
+        
+        float op = u_opacity[i];
+        if (i == 0 || u_soloLayer) {
+            composite = val * op;
+        } else {
+            int bm = u_blendMode[i];
+            if (bm == 0) { // Add
+                composite += val * op;
+            } else if (bm == 1) { // Multiply
+                composite = mix(composite, composite * val, op);
+            } else if (bm == 2) { // Overlay
+                composite = mix(composite, blendOverlay(composite, val), op);
+            }
+        }
+    }
+    return composite;
+}
+
+void main() {
+    vec2 uv = ${forExport ? 'vec2(0.5, 0.5); // Replace with your UV coordinates' : 'vUv;'}
+`;
+
+                if (s.outputMode === 'normal') {
+                    src += `
+    // RGB Normal Map via Derivatives
+    float eps = 0.01;
+    float h = getCompositeNoise(uv).r;
+    float hx = getCompositeNoise(uv + vec2(eps, 0.0)).r;
+    float hy = getCompositeNoise(uv + vec2(0.0, eps)).r;
+    
+    vec3 normal = normalize(vec3(h - hx, h - hy, 0.1));
+    // Remap to [0, 1]
+    normal = normal * 0.5 + 0.5;
+    ${forExport ? 'vec4 fragColor =' : 'fragColor ='} vec4(normal, 1.0);
+`;
+                } else {
+                    src += `
+    vec3 val = getCompositeNoise(uv);
+`;
+                    const hasCurl = s.layers.some(l => l.noiseType === 'curl');
+                    if (hasCurl) {
+                        src += `    ${forExport ? 'vec4 fragColor =' : 'fragColor ='} vec4(val, 1.0);\n`;
+                    } else {
+                        src += `
+    ${forExport ? 'vec4 fragColor =' : 'fragColor ='} vec4(vec3(val.r), 1.0);
+    ${!forExport ? `
+    // Apply local UI gradient mapping
+    vec3 col = u_colors[0];
+    if (u_numColors > 1) {
+        float t = clamp(val.r, 0.0, 1.0) * float(u_numColors - 1);
+        int idx = int(t);
+        float f = fract(t);
+        if (idx >= u_numColors - 1) {
+            col = u_colors[u_numColors - 1];
+        } else {
+            col = mix(u_colors[idx], u_colors[idx + 1], f);
+        }
+    }
+    fragColor = vec4(col, 1.0);
+` : ''}
+`;
+                    }
+                }
+
+                src += `}\n`;
+                return src;
+            }
+
+            compileShader(type, source) {
+                const gl = this.gl;
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, source);
+                gl.compileShader(shader);
+                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                    console.error("Shader compile error:", gl.getShaderInfoLog(shader));
+                    gl.deleteShader(shader);
+                    return null;
+                }
+                return shader;
+            }
+
+            updateShader() {
+                const gl = this.gl;
+                const vs = this.compileShader(gl.VERTEX_SHADER, VERTEX_SHADER_SRC);
+                const fsSource = this.buildFragmentShader(false);
+                const fs = this.compileShader(gl.FRAGMENT_SHADER, fsSource);
+
+                if (vs && fs) {
+                    const prog = gl.createProgram();
+                    gl.attachShader(prog, vs);
+                    gl.attachShader(prog, fs);
+                    gl.linkProgram(prog);
+                    
+                    if (gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+                        if (this.program) gl.deleteProgram(this.program);
+                        this.program = prog;
+                        
+                        this.locs = {
+                            noiseType: gl.getUniformLocation(prog, 'u_noiseType'),
+                            blendMode: gl.getUniformLocation(prog, 'u_blendMode'),
+                            opacity: gl.getUniformLocation(prog, 'u_opacity'),
+                            warpEnabled: gl.getUniformLocation(prog, 'u_warpEnabled'),
+                            warpType: gl.getUniformLocation(prog, 'u_warpType'),
+                            warpStrength: gl.getUniformLocation(prog, 'u_warpStrength'),
+                            scale: gl.getUniformLocation(prog, 'u_scale'),
+                            scaleX: gl.getUniformLocation(prog, 'u_scaleX'),
+                            scaleY: gl.getUniformLocation(prog, 'u_scaleY'),
+                            octaves: gl.getUniformLocation(prog, 'u_octaves'),
+                            persistence: gl.getUniformLocation(prog, 'u_persistence'),
+                            lacunarity: gl.getUniformLocation(prog, 'u_lacunarity'),
+                            sharpness: gl.getUniformLocation(prog, 'u_sharpness'),
+                            time: gl.getUniformLocation(prog, 'u_time'),
+                            timeDirection: gl.getUniformLocation(prog, 'u_timeDirection'),
+                            rotationSpeed: gl.getUniformLocation(prog, 'u_rotationSpeed'),
+                            seedOffset: gl.getUniformLocation(prog, 'u_seedOffset'),
+                            dotSize: gl.getUniformLocation(prog, 'u_dotSize'),
+                            hatchFrequency: gl.getUniformLocation(prog, 'u_hatchFrequency'),
+                            hatchAngle: gl.getUniformLocation(prog, 'u_hatchAngle'),
+                            crossHatch: gl.getUniformLocation(prog, 'u_crossHatch'),
+                            valueInfluence: gl.getUniformLocation(prog, 'u_valueInfluence'),
+                            colors: gl.getUniformLocation(prog, 'u_colors'),
+                            numColors: gl.getUniformLocation(prog, 'u_numColors'),
+                            soloLayer: gl.getUniformLocation(prog, 'u_soloLayer'),
+                            activeLayer: gl.getUniformLocation(prog, 'u_activeLayer')
+                        };
+                    }
+                }
+                this.updateExportedCode();
+            }
+
+            updateExportedCode() {
+                const exportSrc = this.buildFragmentShader(true);
+                document.getElementById('codeOutput').value = exportSrc;
+            }
+
+            render(now, forceSync = false) {
+                const dt = (now - this.lastTime) / 1000.0;
+                this.lastTime = now;
+                
+                let timeUpdated = false;
+                this.state.layers.forEach(layer => {
+                    layer.time += dt * layer.timeSpeed;
+                    if (layer.timeSpeed > 0) timeUpdated = true;
+                });
+                
+                if (timeUpdated && Math.random() < 0.05) {
+                    this.updateExportedCode();
+                }
+
+                const gl = this.gl;
+                if (!this.program) {
+                    if (!forceSync) requestAnimationFrame(this.render.bind(this));
+                    return;
+                }
+
+                gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+                gl.clearColor(0.0, 0.0, 0.0, 1.0);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+
+                gl.useProgram(this.program);
+                
+                // Prepare uniform arrays
+                const numLayers = this.state.layers.length;
+                const arrNoiseType = new Int32Array(numLayers);
+                const arrBlendMode = new Int32Array(numLayers);
+                const arrOpacity = new Float32Array(numLayers);
+                const arrWarpEnabled = new Int32Array(numLayers);
+                const arrWarpType = new Int32Array(numLayers);
+                const arrWarpStrength = new Float32Array(numLayers);
+                const arrScale = new Float32Array(numLayers);
+                const arrScaleX = new Float32Array(numLayers);
+                const arrScaleY = new Float32Array(numLayers);
+                const arrOctaves = new Int32Array(numLayers);
+                const arrPersistence = new Float32Array(numLayers);
+                const arrLacunarity = new Float32Array(numLayers);
+                const arrSharpness = new Float32Array(numLayers);
+                const arrTime = new Float32Array(numLayers);
+                const arrTimeDirection = new Float32Array(numLayers);
+                const arrRotationSpeed = new Float32Array(numLayers);
+                const arrSeedOffset = new Float32Array(numLayers * 2);
+                const arrDotSize = new Float32Array(numLayers);
+                const arrHatchFrequency = new Float32Array(numLayers);
+                const arrHatchAngle = new Float32Array(numLayers);
+                const arrCrossHatch = new Int32Array(numLayers);
+                const arrValueInfluence = new Float32Array(numLayers);
+
+                this.state.layers.forEach((l, i) => {
+                    arrNoiseType[i] = this.getTypeIndex(l.noiseType);
+                    arrBlendMode[i] = this.getBlendModeIndex(l.blendMode);
+                    arrOpacity[i] = l.opacity;
+                    arrWarpEnabled[i] = l.warpEnabled ? 1 : 0;
+                    arrWarpType[i] = this.getTypeIndex(l.warpType);
+                    arrWarpStrength[i] = l.warpStrength;
+                    arrScale[i] = l.scale;
+                    arrScaleX[i] = l.scaleX;
+                    arrScaleY[i] = l.scaleY;
+                    arrOctaves[i] = l.octaves;
+                    arrPersistence[i] = l.persistence;
+                    arrLacunarity[i] = l.lacunarity;
+                    arrSharpness[i] = l.sharpness;
+                    arrTime[i] = l.time;
+                    arrTimeDirection[i] = l.timeDirection;
+                    arrRotationSpeed[i] = l.rotationSpeed;
+                    arrDotSize[i] = l.dotSize;
+                    arrHatchFrequency[i] = l.hatchFrequency;
+                    arrHatchAngle[i] = l.hatchAngle;
+                    arrCrossHatch[i] = l.crossHatch ? 1 : 0;
+                    arrValueInfluence[i] = l.valueInfluence ?? 0;
+                    
+                    // Hash seed on CPU to keep GLSL float precision safe
+                    const sx = (Math.sin(l.seed * 12.9898) * 43758.5453) % 100.0;
+                    const sy = (Math.sin(l.seed * 78.233) * 43758.5453) % 100.0;
+                    arrSeedOffset[i * 2] = sx;
+                    arrSeedOffset[i * 2 + 1] = sy;
+                });
+
+                if (this.locs.noiseType) gl.uniform1iv(this.locs.noiseType, arrNoiseType);
+                if (this.locs.blendMode) gl.uniform1iv(this.locs.blendMode, arrBlendMode);
+                if (this.locs.opacity) gl.uniform1fv(this.locs.opacity, arrOpacity);
+                if (this.locs.warpEnabled) gl.uniform1iv(this.locs.warpEnabled, arrWarpEnabled);
+                if (this.locs.warpType) gl.uniform1iv(this.locs.warpType, arrWarpType);
+                if (this.locs.warpStrength) gl.uniform1fv(this.locs.warpStrength, arrWarpStrength);
+                if (this.locs.scale) gl.uniform1fv(this.locs.scale, arrScale);
+                if (this.locs.scaleX) gl.uniform1fv(this.locs.scaleX, arrScaleX);
+                if (this.locs.scaleY) gl.uniform1fv(this.locs.scaleY, arrScaleY);
+                if (this.locs.octaves) gl.uniform1iv(this.locs.octaves, arrOctaves);
+                if (this.locs.persistence) gl.uniform1fv(this.locs.persistence, arrPersistence);
+                if (this.locs.lacunarity) gl.uniform1fv(this.locs.lacunarity, arrLacunarity);
+                if (this.locs.sharpness) gl.uniform1fv(this.locs.sharpness, arrSharpness);
+                if (this.locs.time) gl.uniform1fv(this.locs.time, arrTime);
+                if (this.locs.timeDirection) gl.uniform1fv(this.locs.timeDirection, arrTimeDirection);
+                if (this.locs.rotationSpeed) gl.uniform1fv(this.locs.rotationSpeed, arrRotationSpeed);
+                if (this.locs.seedOffset) gl.uniform2fv(this.locs.seedOffset, arrSeedOffset);
+                if (this.locs.dotSize) gl.uniform1fv(this.locs.dotSize, arrDotSize);
+                if (this.locs.hatchFrequency) gl.uniform1fv(this.locs.hatchFrequency, arrHatchFrequency);
+                if (this.locs.hatchAngle) gl.uniform1fv(this.locs.hatchAngle, arrHatchAngle);
+                if (this.locs.crossHatch) gl.uniform1iv(this.locs.crossHatch, arrCrossHatch);
+                if (this.locs.valueInfluence) gl.uniform1fv(this.locs.valueInfluence, arrValueInfluence);
+
+                if (this.locs.soloLayer) gl.uniform1i(this.locs.soloLayer, this.state.soloLayer ? 1 : 0);
+                if (this.locs.activeLayer) gl.uniform1i(this.locs.activeLayer, this.state.activeLayerIndex);
+
+                const parseHex = (hex) => [
+                    parseInt(hex.slice(1, 3), 16) / 255,
+                    parseInt(hex.slice(3, 5), 16) / 255,
+                    parseInt(hex.slice(5, 7), 16) / 255
+                ];
+                
+                const colorData = new Float32Array(16 * 3);
+                for (let i = 0; i < this.state.colors.length; i++) {
+                    const rgb = parseHex(this.state.colors[i]);
+                    colorData[i * 3 + 0] = rgb[0];
+                    colorData[i * 3 + 1] = rgb[1];
+                    colorData[i * 3 + 2] = rgb[2];
+                }
+                if (this.locs.colors) gl.uniform3fv(this.locs.colors, colorData);
+                if (this.locs.numColors) gl.uniform1i(this.locs.numColors, this.state.colors.length);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+                const posLoc = gl.getAttribLocation(this.program, "aPosition");
+                gl.enableVertexAttribArray(posLoc);
+                gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                
+                // Update Background Canvas
+                const bgCanvas = document.getElementById('bg-canvas');
+                if (bgCanvas && this.canvas.width > 0) {
+                    if (bgCanvas.width !== this.canvas.width || bgCanvas.height !== this.canvas.height) {
+                        bgCanvas.width = this.canvas.width;
+                        bgCanvas.height = this.canvas.height;
+                    }
+                    const ctx = bgCanvas.getContext('2d');
+                    ctx.drawImage(this.canvas, 0, 0);
+                }
+
+                if (!forceSync) {
+                    requestAnimationFrame(this.render.bind(this));
+                }
+            }
+        }
+
+        window.onload = () => {
+            new NoiseApp();
+            
+            // Fade out loading screen
+            const loader = document.getElementById('loading-screen');
+            if (loader) {
+                // Ensure the progress bar reaches the end visually before fading out
+                setTimeout(() => {
+                    loader.style.opacity = '0';
+                    setTimeout(() => loader.remove(), 500);
+                }, 100);
+            }
+        };
+    </script>
+</body>
+</html>
